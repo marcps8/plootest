@@ -96,11 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run migrations (single runner, expand/contract)
-        run: |
-          psql "$DATABASE_URL_DIRECT" -f infra/neon/schema.sql
         env:
           DATABASE_URL_DIRECT: ${{ secrets.VAULT_DATABASE_URL_DIRECT }}
-          # Prod: hashicorp/vault-action inyecta DATABASE_URL_DIRECT desde Vault (TTL 10 min)
+        run: |
+          if [ -z "$DATABASE_URL_DIRECT" ]; then
+            echo "Skip: VAULT_DATABASE_URL_DIRECT no configurado (repo de assessment; ver WRITEUP B.2)."
+            exit 0
+          fi
+          psql "$DATABASE_URL_DIRECT" -f infra/neon/schema.sql
 
   deploy-production:
     name: Deploy production
@@ -117,7 +120,14 @@ jobs:
       - name: Deploy worker (Railway)
         run: echo "Railway auto-deploy on push to main (worker/) via railway.toml"
       - name: Post-deploy smoke
-        run: curl -sf https://ploot-scheduler.vercel.app/api/health
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "Skip: PRODUCTION_URL no configurado (repo de assessment)."
+            exit 0
+          fi
+          curl -sf "$PRODUCTION_URL/api/health"
 
   rollback-watch:
     name: Rollback monitor (post-deploy)
