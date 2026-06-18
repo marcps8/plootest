@@ -1,0 +1,9 @@
+{
+  "name": "ploot-scheduler",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix shared && npm run build --prefix app && npm run build --prefix worker",
+    "test": "npm run test --prefix shared && npm run test --prefix worker",
+    "typecheck": "npm run typecheck --prefix shared && npm run typecheck --prefix app && npm run typecheck --prefix worker"
+  }
+}

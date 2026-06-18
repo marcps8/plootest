@@ -1,0 +1,27 @@
+# Railway — worker de larga vida (NO serverless, NO Vercel Cron)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "worker/Dockerfile"
+watchPatterns = ["worker/**", "shared/**"]
+
+[deploy]
+numReplicas = 2
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+
+# Railway (descartamos Vercel Cron Jobs):
+# - Timeout máximo en Cron (~60s–300s) insuficiente para backoff 429/5xx
+# - Sin conexión persistente a SQS (long polling)
+# - Sin estado de throttling entre ticks
+
+# Secretos inyectados via Vault Agent → Railway env (ver infra/secrets/)
+# AWS SQS + Upstash Redis + Neon direct connection
+
+[deploy.env]
+NODE_ENV = "production"
+AWS_REGION = "eu-central-1"
+DD_SERVICE = "ploot-scheduler-worker"
+DD_ENV = "production"

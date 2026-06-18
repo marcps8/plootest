@@ -1,0 +1,111 @@
+# Local development — levanta todo en < 60s
+# Producción: Cloudflare → Vercel · Railway · Neon · SQS · Upstash · Vault · Datadog
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ploot
+      POSTGRES_PASSWORD: ploot_dev
+      POSTGRES_DB: ploot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./neon/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./neon/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ploot"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      DEFAULT_REGION: eu-central-1
+    volumes:
+      - ./localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  mock-provider:
+    build:
+      context: ../mock-provider
+      dockerfile: Dockerfile
+    environment:
+      DETERMINISTIC: "1"
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://ploot:ploot_dev@postgres:5432/ploot?sslmode=disable
+      JWT_SECRET: dev-jwt-secret-change-in-prod
+      PROVIDER_BASE_URL: http://mock-provider:4000
+      OAUTH_CLIENT_SECRET: dev-oauth-secret
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+      NODE_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-provider:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://ploot:ploot_dev@postgres:5432/ploot?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      AWS_REGION: eu-central-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/ploot-publish-jobs
+      PROVIDER_BASE_URL: http://mock-provider:4000
+      OAUTH_CLIENT_SECRET: dev-oauth-secret
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+      WORKER_CONCURRENCY: "5"
+      NODE_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      mock-provider:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+volumes:
+  postgres_data:

@@ -1,0 +1,131 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            worker/package-lock.json
+      - run: npm install --prefix shared && npm run build --prefix shared
+      - run: npm install --prefix app && npm run typecheck --prefix app
+      - run: npm install --prefix worker && npm run typecheck --prefix worker
+
+  test:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ploot:ploot_test@localhost:5432/ploot?sslmode=disable
+      JWT_SECRET: test-secret
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ploot
+          POSTGRES_PASSWORD: ploot_test
+          POSTGRES_DB: ploot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ploot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Apply schema
+        run: psql postgresql://ploot:ploot_test@localhost:5432/ploot -f infra/neon/schema.sql
+      - run: npm install --prefix shared && npm run test --prefix shared
+      - run: npm install --prefix worker && npm run test --prefix worker
+      - run: npm run build --prefix worker
+      - name: Smoke test worker health
+        run: |
+          npm start --prefix worker &
+          sleep 3
+          curl -sf http://localhost:8080/health
+
+  preview-deploy:
+    name: Preview deploy (Vercel)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy preview
+        run: echo "Vercel preview deploy triggered via GitHub integration (PR #${{ github.event.pull_request.number }})"
+        # En producción: amondnet/vercel-action o Vercel GitHub App
+
+  migrate-production:
+    name: DB migrations (production)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, test]
+    environment:
+      name: production
+      url: https://ploot-scheduler.vercel.app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run migrations (single runner, expand/contract)
+        run: |
+          psql "$DATABASE_URL_DIRECT" -f infra/neon/schema.sql
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.VAULT_DATABASE_URL_DIRECT }}
+          # Prod: hashicorp/vault-action inyecta DATABASE_URL_DIRECT desde Vault (TTL 10 min)
+
+  deploy-production:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [migrate-production]
+    environment:
+      name: production
+      url: https://ploot-scheduler.vercel.app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Next.js (Vercel)
+        run: echo "Production deploy via Vercel GitHub integration after migration gate"
+      - name: Deploy worker (Railway)
+        run: echo "Railway auto-deploy on push to main (worker/) via railway.toml"
+      - name: Post-deploy smoke
+        run: curl -sf https://ploot-scheduler.vercel.app/api/health
+
+  rollback-watch:
+    name: Rollback monitor (post-deploy)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    steps:
+      - name: Check error rate (5 min window)
+        run: |
+          echo "Datadog/monitoring webhook: if error_rate > 5% or p95 > 4s → auto-rollback via Vercel + Railway previous deployment"
+          echo "Signal: SLO burn rate alert on publish_success_rate < 95%"

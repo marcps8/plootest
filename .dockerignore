@@ -1,0 +1,10 @@
+**/node_modules
+**/.next
+**/dist
+.git
+.gitignore
+**/*.md
+.env
+.env.*
+.cursor
+docs

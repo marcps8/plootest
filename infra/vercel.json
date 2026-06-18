@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "cd app && npm run build",
+  "devCommand": "cd app && npm run dev",
+  "installCommand": "cd app && npm install",
+  "framework": "nextjs",
+  "outputDirectory": "app/.next",
+  "regions": ["fra1"],
+  "functions": {
+    "app/src/middleware.ts": {
+      "runtime": "edge"
+    },
+    "app/src/app/api/**/*.ts": {
+      "runtime": "nodejs",
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "DATABASE_URL": "@vault-database-url-pooled",
+    "JWT_SECRET": "@vault-jwt-secret",
+    "PROVIDER_BASE_URL": "@vault-provider-base-url",
+    "OAUTH_CLIENT_SECRET": "@vault-oauth-client-secret",
+    "TOKEN_ENCRYPTION_KEY": "@vault-token-encryption-key",
+    "DD_SERVICE": "ploot-scheduler-api",
+    "DD_ENV": "production"
+  }
+}
