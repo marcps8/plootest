@@ -78,9 +78,12 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/posts
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d postgres redis
+npm run build --prefix shared
 DATABASE_URL=postgresql://ploot:ploot_dev@localhost:5432/ploot npm run test --prefix shared
 DATABASE_URL=postgresql://ploot:ploot_dev@localhost:5432/ploot npm run test --prefix worker
 ```
+
+`worker` compila `shared` automáticamente vía `pretest` si falta `dist/`.
 
 ## Producción
 

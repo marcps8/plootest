@@ -65,7 +65,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Apply schema
         run: psql postgresql://ploot:ploot_test@localhost:5432/ploot -f infra/neon/schema.sql
-      - run: npm install --prefix shared && npm run test --prefix shared
+      - run: npm install --prefix shared && npm run build --prefix shared && npm run test --prefix shared
       - run: npm install --prefix worker && npm run test --prefix worker
       - run: npm run build --prefix worker
       - name: Smoke test worker health
